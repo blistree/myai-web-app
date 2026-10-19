@@ -421,11 +421,18 @@ document.addEventListener("DOMContentLoaded", () => {
       typingIndicatorRow.remove();
 
       if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
+        let errorMsg = "";
+        try {
+          const errData = await response.json();
+          errorMsg = errData.error;
+        } catch (_) {
+          const rawText = await response.text().catch(() => "");
+          errorMsg = rawText ? rawText.slice(0, 150) : `HTTP ${response.status} ${response.statusText}`;
+        }
         if (response.status === 401 || response.status === 403) {
           authModalOverlay.style.display = "flex";
         }
-        throw new Error(errData.error || "Server response failed");
+        throw new Error(errorMsg || `Server response failed (${response.status})`);
       }
 
       const data = await response.json();

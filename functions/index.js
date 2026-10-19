@@ -275,15 +275,14 @@ router.post("/chat", requireAuthorizedAdmin, async (req, res) => {
     const activeEthics = getActiveEthics();
 
     try {
-      // 1. Primary: 100% Private Self-Hosted Gemma 2 on Google Cloud VM
+      // 1. Primary: 100% Private Self-Hosted Sovereign Model on Google Cloud VM
       replyText = await callPrivateModelServer(messages, activeEthics.prompt, PRIVATE_MODEL, req.signal);
     } catch (privateVmError) {
       if (req.closed || req.signal?.aborted) {
         return;
       }
-      console.warn("Private VM unavailable, using standby fallback:", privateVmError.message);
-      provider = "vertex-ai-standby";
-      replyText = await callVertexAIFallback(messages, activeEthics.prompt);
+      console.error("Private VM error:", privateVmError.message);
+      throw new Error("Private server is busy or generating another response. Please retry in a moment: " + privateVmError.message);
     }
 
     if (req.closed || req.signal?.aborted) {
