@@ -23,9 +23,15 @@ const PRIVATE_MODEL = process.env.MODEL_NAME || "gemma2:2b";
 
 const {getActiveEthics} = require("./ethics");
 
-const auth = new GoogleAuth({
-  scopes: "https://www.googleapis.com/auth/cloud-platform",
-});
+let authClient = null;
+function getAuth() {
+  if (!authClient) {
+    authClient = new GoogleAuth({
+      scopes: "https://www.googleapis.com/auth/cloud-platform",
+    });
+  }
+  return authClient;
+}
 
 // Call Private Self-Hosted Gemma 2 Model Server on Google Cloud VM
 async function callPrivateModelServer(messages, systemInstruction, modelName = PRIVATE_MODEL) {
@@ -62,7 +68,7 @@ async function callPrivateModelServer(messages, systemInstruction, modelName = P
 
 // Fallback Vertex AI Publisher API (if private VM is sleeping/offline)
 async function callVertexAIFallback(messages, systemInstruction) {
-  const client = await auth.getClient();
+  const client = await getAuth().getClient();
   const tokenResponse = await client.getAccessToken();
   const token = typeof tokenResponse === "string" ? tokenResponse : tokenResponse.token;
 
