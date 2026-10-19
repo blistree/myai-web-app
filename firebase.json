@@ -15,21 +15,11 @@
         ".git",
         "firebase-debug.log",
         "firebase-debug.*.log",
-        "*.local"
+        "*.local",
+        ".runtimeconfig.json"
       ]
     }
   ],
-  "apphosting": {
-    "backendId": "myai-web-app",
-    "rootDir": ".",
-    "ignore": [
-      "node_modules",
-      ".git",
-      "firebase-debug.log",
-      "firebase-debug.*.log",
-      "functions"
-    ]
-  },
   "hosting": {
     "public": "public",
     "ignore": [
@@ -48,6 +38,7 @@
     ]
   },
   "storage": {
-    "rules": "storage.rules"
+    "rules": "storage.rules",
+    "bucket": "ai-projects-ca4cf.firebasestorage.app"
   }
 }

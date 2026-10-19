@@ -1,0 +1,11 @@
+{
+  "name": "myai-web-app",
+  "version": "1.0.0",
+  "description": "Sovereign AI Web Application for Indian Jurisprudence & Indigenous Autonomy",
+  "private": true,
+  "scripts": {
+    "build": "node -e \"console.log('Root build completed successfully')\"",
+    "lint": "npm --prefix functions run lint",
+    "deploy": "firebase deploy"
+  }
+}
