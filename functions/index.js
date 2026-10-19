@@ -17,6 +17,10 @@ app.use(express.json());
 const PROJECT_ID = process.env.GCLOUD_PROJECT || "ai-projects-ca4cf";
 const LOCATION = process.env.VERTEX_LOCATION || "global";
 
+// Private Self-Hosted Model Server (Google Compute Engine VM)
+const MODEL_SERVER_URL = process.env.MODEL_SERVER_URL || "http://34.93.230.99:11434";
+const PRIVATE_MODEL = process.env.MODEL_NAME || "gemma2:2b";
+
 const auth = new GoogleAuth({
   scopes: "https://www.googleapis.com/auth/cloud-platform",
 });
@@ -28,28 +32,61 @@ Key Principles:
 3. Administrative Knowledge: You understand the administrative hierarchy in India—Panchayati Raj, Municipal Corporations (Nagar Nigam/Palika), Tehsildar, Sub-Divisional Magistrate (SDM), District Magistrate (DM/Collector), and State/Central departments.
 4. Tone & Style: Be helpful, precise, respectful, and articulate. Provide practical guidance, cite relevant legal sections/schemes where appropriate, and support both English, Hindi, and Hinglish.`;
 
-// Directly call Vertex AI Publisher Model API with global routing
-async function callVertexAI(contents, systemInstruction, modelName = "gemini-2.5-flash") {
+// Call Private Self-Hosted Gemma 2 Model Server on Google Cloud VM
+async function callPrivateModelServer(messages, systemInstruction, modelName = PRIVATE_MODEL) {
+  const formattedMessages = [
+    {role: "system", content: systemInstruction},
+    ...messages,
+  ];
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+  const url = `${MODEL_SERVER_URL}/v1/chat/completions`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      model: modelName,
+      messages: formattedMessages,
+      temperature: 0.7,
+    }),
+    signal: controller.signal,
+  });
+
+  clearTimeout(timeoutId);
+
+  const data = await response.json();
+  if (data.error) {
+    throw new Error(data.error.message || JSON.stringify(data.error));
+  }
+
+  const candidate = data.choices?.[0]?.message?.content;
+  return candidate || "No response received.";
+}
+
+// Fallback Vertex AI Publisher API (if private VM is sleeping/offline)
+async function callVertexAIFallback(messages, systemInstruction) {
   const client = await auth.getClient();
   const tokenResponse = await client.getAccessToken();
   const token = typeof tokenResponse === "string" ? tokenResponse : tokenResponse.token;
 
-  const url = `https://aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/${modelName}:generateContent`;
+  const contents = messages.map((m) => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{text: m.content}],
+  }));
 
-  const payload = {
-    contents,
-    systemInstruction: {
-      parts: [{text: systemInstruction}],
-    },
-  };
-
+  const url = `https://aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/gemini-2.5-flash:generateContent`;
   const response = await fetch(url, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      contents,
+      systemInstruction: {parts: [{text: systemInstruction}]},
+    }),
   });
 
   const data = await response.json();
@@ -64,13 +101,25 @@ async function callVertexAI(contents, systemInstruction, modelName = "gemini-2.5
 const router = express.Router();
 
 // Health check
-router.get("/health", (req, res) => {
+router.get("/health", async (req, res) => {
+  let privateVmOnline = false;
+  try {
+    const check = await fetch(`${MODEL_SERVER_URL}/api/tags`, {signal: AbortSignal.timeout(3000)});
+    if (check.ok) privateVmOnline = true;
+  } catch (e) {
+    privateVmOnline = false;
+  }
+
   res.json({
     status: "online",
-    name: "MYAi Cloud Service",
-    project: PROJECT_ID,
-    location: LOCATION,
-    target: "Gemma 2 / Indian Legal Core",
+    name: "MYAi Sovereign AI Server",
+    activeModel: PRIVATE_MODEL,
+    selfHostedVm: {
+      ip: "34.93.230.99",
+      zone: "asia-south1-c (Mumbai, India)",
+      status: privateVmOnline ? "CONNECTED_AND_ACTIVE" : "STANDBY",
+    },
+    fallback: "Vertex AI Global Endpoint",
   });
 });
 
@@ -138,29 +187,30 @@ router.post("/chat", async (req, res) => {
       return res.status(400).json({error: "Message is required"});
     }
 
-    // Format conversation history for Vertex AI
-    const contents = [];
-
-    // Append past messages
+    const messages = [];
     if (Array.isArray(history)) {
       for (const turn of history.slice(-10)) {
         if (turn.role && turn.content) {
-          contents.push({
-            role: turn.role === "assistant" ? "model" : "user",
-            parts: [{text: turn.content}],
+          messages.push({
+            role: turn.role === "assistant" ? "assistant" : "user",
+            content: turn.content,
           });
         }
       }
     }
+    messages.push({role: "user", content: message});
 
-    // Append current user message
-    contents.push({
-      role: "user",
-      parts: [{text: message}],
-    });
+    let replyText = "";
+    let provider = "self-hosted-gemma2-9b";
 
-    const modelName = process.env.MODEL_NAME || "gemini-2.5-flash";
-    const replyText = await callVertexAI(contents, INDIA_SYSTEM_PROMPT, modelName);
+    try {
+      // 1. Primary: 100% Private Self-Hosted Gemma 2 on Google Cloud VM
+      replyText = await callPrivateModelServer(messages, INDIA_SYSTEM_PROMPT, PRIVATE_MODEL);
+    } catch (privateVmError) {
+      console.warn("Private VM unavailable, using standby fallback:", privateVmError.message);
+      provider = "vertex-ai-standby";
+      replyText = await callVertexAIFallback(messages, INDIA_SYSTEM_PROMPT);
+    }
 
     // Persist to Firestore
     const activeChatId = chatId || db.collection("chats").doc().id;
@@ -170,7 +220,7 @@ router.post("/chat", async (req, res) => {
     const newMessages = [
       ...(chatDoc.exists ? chatDoc.data().messages || [] : []),
       {role: "user", content: message, timestamp: new Date().toISOString()},
-      {role: "assistant", content: replyText, timestamp: new Date().toISOString()},
+      {role: "assistant", content: replyText, timestamp: new Date().toISOString(), provider},
     ];
 
     const chatTitle = chatDoc.exists ?
@@ -189,6 +239,7 @@ router.post("/chat", async (req, res) => {
       chatId: activeChatId,
       reply: replyText,
       title: chatTitle,
+      provider,
     });
   } catch (error) {
     console.error("Error in /chat endpoint:", error);
