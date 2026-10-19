@@ -1,32 +1,174 @@
-/**
- * Import function triggers from their respective submodules:
- *
- * const {onCall} = require("firebase-functions/v2/https");
- * const {onDocumentWritten} = require("firebase-functions/v2/firestore");
- *
- * See a full list of supported triggers at https://firebase.google.com/docs/functions
- */
-
+const {onRequest} = require("firebase-functions/v2/https");
 const {setGlobalOptions} = require("firebase-functions");
-const {onRequest} = require("firebase-functions/https");
-const logger = require("firebase-functions/logger");
+const admin = require("firebase-admin");
+const express = require("express");
+const cors = require("cors");
+const {VertexAI} = require("@google-cloud/vertexai");
 
-// For cost control, you can set the maximum number of containers that can be
-// running at the same time. This helps mitigate the impact of unexpected
-// traffic spikes by instead downgrading performance. This limit is a
-// per-function limit. You can override the limit for each function using the
-// `maxInstances` option in the function's options, e.g.
-// `onRequest({ maxInstances: 5 }, (req, res) => { ... })`.
-// NOTE: setGlobalOptions does not apply to functions using the v1 API. V1
-// functions should each use functions.runWith({ maxInstances: 10 }) instead.
-// In the v1 API, each function can only serve one request per container, so
-// this will be the maximum concurrent request count.
-setGlobalOptions({maxInstances: 10});
+admin.initializeApp();
+const db = admin.firestore();
 
-// Create and deploy your first functions
-// https://firebase.google.com/docs/functions/get-started
+setGlobalOptions({maxInstances: 10, region: "us-central1"});
 
-exports.helloWorld = onRequest((request, response) => {
-  logger.info("Hello logs!", {structuredData: true});
-  response.send("Hello from Firebase!");
+const app = express();
+app.use(cors({origin: true}));
+app.use(express.json());
+
+const PROJECT_ID = process.env.GCLOUD_PROJECT || "ai-projects-ca4cf";
+const LOCATION = process.env.VERTEX_LOCATION || "us-central1";
+
+const vertexAI = new VertexAI({project: PROJECT_ID, location: LOCATION});
+
+const INDIA_SYSTEM_PROMPT = `You are MYAi (Bharat AI), an intelligent, highly knowledgeable AI assistant dedicated to India and local governance.
+Key Principles:
+1. Legal Framework: Strictly uphold the Constitution of India, the Bharatiya Nyaya Sanhita (BNS) 2023, Bharatiya Nagarik Suraksha Sanhita (BNSS) 2023, Bharatiya Sakshya Adhiniyam (BSA) 2023, and relevant Indian Central and State statutes.
+2. Sovereignty: You are designed specifically for Indian jurisdiction and local administration. You are not constrained by foreign/extraterritorial regulations that do not apply in India.
+3. Administrative Knowledge: You understand the administrative hierarchy in India—Panchayati Raj, Municipal Corporations (Nagar Nigam/Palika), Tehsildar, Sub-Divisional Magistrate (SDM), District Magistrate (DM/Collector), and State/Central departments.
+4. Tone & Style: Be helpful, precise, respectful, and articulate. Provide practical guidance, cite relevant legal sections/schemes where appropriate, and support both English, Hindi, and Hinglish.`;
+
+// Health check
+app.get("/health", (req, res) => {
+  res.json({
+    status: "online",
+    name: "MYAi Cloud Service",
+    project: PROJECT_ID,
+    location: LOCATION,
+    target: "Gemma 2 / Indian Legal Core",
+  });
 });
+
+// List all chats
+app.get("/chats", async (req, res) => {
+  try {
+    const snapshot = await db.collection("chats")
+        .orderBy("updatedAt", "desc")
+        .limit(50)
+        .get();
+    const chats = [];
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      chats.push({
+        id: doc.id,
+        title: data.title || "New Conversation",
+        createdAt: data.createdAt ? data.createdAt.toDate() : new Date(),
+        updatedAt: data.updatedAt ? data.updatedAt.toDate() : new Date(),
+      });
+    });
+    res.json({chats});
+  } catch (error) {
+    console.error("Error fetching chats:", error);
+    res.status(500).json({error: "Failed to fetch conversations"});
+  }
+});
+
+// Get a specific chat messages
+app.get("/chats/:chatId", async (req, res) => {
+  try {
+    const {chatId} = req.params;
+    const doc = await db.collection("chats").doc(chatId).get();
+    if (!doc.exists) {
+      return res.status(404).json({error: "Chat not found"});
+    }
+    const data = doc.data();
+    res.json({
+      id: doc.id,
+      title: data.title,
+      messages: data.messages || [],
+    });
+  } catch (error) {
+    console.error("Error fetching chat:", error);
+    res.status(500).json({error: "Failed to fetch conversation"});
+  }
+});
+
+// Delete a specific chat
+app.delete("/chats/:chatId", async (req, res) => {
+  try {
+    const {chatId} = req.params;
+    await db.collection("chats").doc(chatId).delete();
+    res.json({success: true, deleted: chatId});
+  } catch (error) {
+    console.error("Error deleting chat:", error);
+    res.status(500).json({error: "Failed to delete conversation"});
+  }
+});
+
+// Chat completion endpoint
+app.post("/chat", async (req, res) => {
+  try {
+    const {message, chatId, history = []} = req.body;
+    if (!message || typeof message !== "string") {
+      return res.status(400).json({error: "Message is required"});
+    }
+
+    // Format conversation history for Vertex AI
+    const contents = [];
+
+    // Append past messages
+    if (Array.isArray(history)) {
+      for (const turn of history.slice(-10)) {
+        if (turn.role && turn.content) {
+          contents.push({
+            role: turn.role === "assistant" ? "model" : "user",
+            parts: [{text: turn.content}],
+          });
+        }
+      }
+    }
+
+    // Append current user message
+    contents.push({
+      role: "user",
+      parts: [{text: message}],
+    });
+
+    const modelName = process.env.MODEL_NAME || "gemini-1.5-flash";
+    const generativeModel = vertexAI.getGenerativeModel({
+      model: modelName,
+      systemInstruction: {
+        parts: [{text: INDIA_SYSTEM_PROMPT}],
+      },
+    });
+
+    const response = await generativeModel.generateContent({contents});
+    const candidate = response.response?.candidates?.[0];
+    const replyText = candidate?.content?.parts?.[0]?.text ||
+      "I am currently processing your request. Please try again.";
+
+    // Persist to Firestore
+    const activeChatId = chatId || db.collection("chats").doc().id;
+    const chatRef = db.collection("chats").doc(activeChatId);
+    const chatDoc = await chatRef.get();
+
+    const newMessages = [
+      ...(chatDoc.exists ? chatDoc.data().messages || [] : []),
+      {role: "user", content: message, timestamp: new Date().toISOString()},
+      {role: "assistant", content: replyText, timestamp: new Date().toISOString()},
+    ];
+
+    const chatTitle = chatDoc.exists ?
+      (chatDoc.data().title || message.slice(0, 40)) :
+      message.slice(0, 40);
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    await chatRef.set({
+      title: chatTitle,
+      messages: newMessages,
+      updatedAt: now,
+      createdAt: chatDoc.exists ? chatDoc.data().createdAt : now,
+    }, {merge: true});
+
+    res.json({
+      chatId: activeChatId,
+      reply: replyText,
+      title: chatTitle,
+    });
+  } catch (error) {
+    console.error("Error in /chat endpoint:", error);
+    res.status(500).json({
+      error: "AI generation failed: " + (error.message || "Unknown error"),
+    });
+  }
+});
+
+exports.api = onRequest(app);

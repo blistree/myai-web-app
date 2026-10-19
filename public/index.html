@@ -1,15 +1,154 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Welcome to Firebase Hosting</title>
-  </head>
-  <body>
-    <div id="message">
-      <h2>Welcome</h2>
-      <h1>Firebase Hosting Setup Complete</h1>
-      <p>You're seeing this because you've successfully setup Firebase Hosting. Now it's time to build something extraordinary!</p>
-    </div>
-  </body>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MYAi - Sovereign Bharat AI Assistant</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🇮🇳</text></svg>">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="dark-theme">
+  <div class="app-container">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <div class="brand-badge">🇮🇳</div>
+          <div class="brand-text">
+            <span class="brand-title">MYAi</span>
+            <span class="brand-sub">Bharat Sovereign AI</span>
+          </div>
+        </div>
+        <button id="new-chat-btn" class="btn btn-new-chat" title="Start a new chat">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          New Chat
+        </button>
+      </div>
+
+      <div class="sidebar-section-title">Recent Conversations</div>
+      <div class="chat-list" id="chat-list">
+        <div class="chat-list-empty">No conversations yet</div>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="status-indicator">
+          <span class="status-dot"></span>
+          <span class="status-text">Core: Gemma 2 / Indian Law</span>
+        </div>
+        <button id="theme-toggle" class="btn btn-secondary btn-icon" title="Toggle Theme">
+          <svg class="sun-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+          </svg>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Overlay for mobile sidebar -->
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <!-- Main Chat Content -->
+    <main class="chat-main">
+      <header class="chat-header">
+        <button id="menu-btn" class="btn btn-icon btn-menu" aria-label="Toggle menu">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+        <div class="chat-header-info">
+          <span class="active-model-pill">Gemma 2 9B • Indian Legal & District Core</span>
+        </div>
+      </header>
+
+      <!-- Message History Container -->
+      <div class="messages-container" id="messages-container">
+        <!-- Welcome Screen (shown when no messages) -->
+        <div class="welcome-screen" id="welcome-screen">
+          <div class="welcome-icon">🏛️</div>
+          <h1 class="welcome-title">Namaste! How can I assist you today?</h1>
+          <p class="welcome-subtitle">
+            I am your dedicated AI assistant, aligned specifically with <strong>Indian Law, BNS 2023, and Local Governance</strong>.
+          </p>
+
+          <div class="prompt-grid">
+            <div class="prompt-card" data-prompt="Explain the key differences between the Indian Penal Code (IPC) and Bharatiya Nyaya Sanhita (BNS) 2023.">
+              <span class="prompt-card-icon">⚖️</span>
+              <div class="prompt-card-text">
+                <strong>Indian Criminal Law</strong>
+                <p>Differences between IPC & Bharatiya Nyaya Sanhita (BNS) 2023</p>
+              </div>
+            </div>
+
+            <div class="prompt-card" data-prompt="How do I file a Right to Information (RTI) application with the District Magistrate / Collector's office?">
+              <span class="prompt-card-icon">📜</span>
+              <div class="prompt-card-text">
+                <strong>RTI & Citizen Rights</strong>
+                <p>Filing an RTI with the District Magistrate's office</p>
+              </div>
+            </div>
+
+            <div class="prompt-card" data-prompt="Explain the land revenue mutation (Dakhil Kharij) process under the Tehsildar in Indian states.">
+              <span class="prompt-card-icon">🌾</span>
+              <div class="prompt-card-text">
+                <strong>District Administration</strong>
+                <p>Land revenue mutation process under the Tehsildar</p>
+              </div>
+            </div>
+
+            <div class="prompt-card" data-prompt="What are citizen protections under the Digital Personal Data Protection (DPDP) Act 2023 in India?">
+              <span class="prompt-card-icon">🔒</span>
+              <div class="prompt-card-text">
+                <strong>Data Privacy</strong>
+                <p>Protections under the DPDP Act 2023 in India</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Chat messages dynamically rendered here -->
+        <div class="messages-list" id="messages-list"></div>
+      </div>
+
+      <!-- Input Footer -->
+      <footer class="input-footer">
+        <form class="input-form" id="chat-form">
+          <div class="input-wrapper">
+            <textarea
+              id="prompt-input"
+              placeholder="Ask anything about Indian laws, governance, or administrative procedures..."
+              rows="1"
+              required
+            ></textarea>
+            <button type="submit" id="send-btn" class="btn btn-send" aria-label="Send message">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+            </button>
+          </div>
+        </form>
+        <div class="input-caption">
+          MYAi operates strictly under Indian legal frameworks. Always verify critical statutory filings with an advocate.
+        </div>
+      </footer>
+    </main>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="app.js"></script>
+</body>
 </html>
