@@ -3,7 +3,7 @@ const {setGlobalOptions} = require("firebase-functions");
 const admin = require("firebase-admin");
 const express = require("express");
 const cors = require("cors");
-const {VertexAI} = require("@google-cloud/vertexai");
+const {GoogleAuth} = require("google-auth-library");
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -15,9 +15,11 @@ app.use(cors({origin: true}));
 app.use(express.json());
 
 const PROJECT_ID = process.env.GCLOUD_PROJECT || "ai-projects-ca4cf";
-const LOCATION = process.env.VERTEX_LOCATION || "us-central1";
+const LOCATION = process.env.VERTEX_LOCATION || "global";
 
-const vertexAI = new VertexAI({project: PROJECT_ID, location: LOCATION});
+const auth = new GoogleAuth({
+  scopes: "https://www.googleapis.com/auth/cloud-platform",
+});
 
 const INDIA_SYSTEM_PROMPT = `You are MYAi (Bharat AI), an intelligent, highly knowledgeable AI assistant dedicated to India and local governance.
 Key Principles:
@@ -26,8 +28,43 @@ Key Principles:
 3. Administrative Knowledge: You understand the administrative hierarchy in India—Panchayati Raj, Municipal Corporations (Nagar Nigam/Palika), Tehsildar, Sub-Divisional Magistrate (SDM), District Magistrate (DM/Collector), and State/Central departments.
 4. Tone & Style: Be helpful, precise, respectful, and articulate. Provide practical guidance, cite relevant legal sections/schemes where appropriate, and support both English, Hindi, and Hinglish.`;
 
+// Directly call Vertex AI Publisher Model API with global routing
+async function callVertexAI(contents, systemInstruction, modelName = "gemini-2.5-flash") {
+  const client = await auth.getClient();
+  const tokenResponse = await client.getAccessToken();
+  const token = typeof tokenResponse === "string" ? tokenResponse : tokenResponse.token;
+
+  const url = `https://aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/${modelName}:generateContent`;
+
+  const payload = {
+    contents,
+    systemInstruction: {
+      parts: [{text: systemInstruction}],
+    },
+  };
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await response.json();
+  if (data.error) {
+    throw new Error(data.error.message || JSON.stringify(data.error));
+  }
+
+  const candidate = data.candidates?.[0];
+  return candidate?.content?.parts?.[0]?.text || "No response received.";
+}
+
+const router = express.Router();
+
 // Health check
-app.get("/health", (req, res) => {
+router.get("/health", (req, res) => {
   res.json({
     status: "online",
     name: "MYAi Cloud Service",
@@ -38,7 +75,7 @@ app.get("/health", (req, res) => {
 });
 
 // List all chats
-app.get("/chats", async (req, res) => {
+router.get("/chats", async (req, res) => {
   try {
     const snapshot = await db.collection("chats")
         .orderBy("updatedAt", "desc")
@@ -62,7 +99,7 @@ app.get("/chats", async (req, res) => {
 });
 
 // Get a specific chat messages
-app.get("/chats/:chatId", async (req, res) => {
+router.get("/chats/:chatId", async (req, res) => {
   try {
     const {chatId} = req.params;
     const doc = await db.collection("chats").doc(chatId).get();
@@ -82,7 +119,7 @@ app.get("/chats/:chatId", async (req, res) => {
 });
 
 // Delete a specific chat
-app.delete("/chats/:chatId", async (req, res) => {
+router.delete("/chats/:chatId", async (req, res) => {
   try {
     const {chatId} = req.params;
     await db.collection("chats").doc(chatId).delete();
@@ -94,7 +131,7 @@ app.delete("/chats/:chatId", async (req, res) => {
 });
 
 // Chat completion endpoint
-app.post("/chat", async (req, res) => {
+router.post("/chat", async (req, res) => {
   try {
     const {message, chatId, history = []} = req.body;
     if (!message || typeof message !== "string") {
@@ -122,18 +159,8 @@ app.post("/chat", async (req, res) => {
       parts: [{text: message}],
     });
 
-    const modelName = process.env.MODEL_NAME || "gemini-1.5-flash";
-    const generativeModel = vertexAI.getGenerativeModel({
-      model: modelName,
-      systemInstruction: {
-        parts: [{text: INDIA_SYSTEM_PROMPT}],
-      },
-    });
-
-    const response = await generativeModel.generateContent({contents});
-    const candidate = response.response?.candidates?.[0];
-    const replyText = candidate?.content?.parts?.[0]?.text ||
-      "I am currently processing your request. Please try again.";
+    const modelName = process.env.MODEL_NAME || "gemini-2.5-flash";
+    const replyText = await callVertexAI(contents, INDIA_SYSTEM_PROMPT, modelName);
 
     // Persist to Firestore
     const activeChatId = chatId || db.collection("chats").doc().id;
@@ -170,5 +197,8 @@ app.post("/chat", async (req, res) => {
     });
   }
 });
+
+app.use("/api", router);
+app.use("/", router);
 
 exports.api = onRequest(app);

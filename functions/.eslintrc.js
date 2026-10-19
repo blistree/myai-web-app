@@ -17,6 +17,7 @@ module.exports = {
     "max-len": ["warn", {"code": 120, "ignoreComments": true, "ignoreStrings": true, "ignoreTemplateLiterals": true}],
     "require-jsdoc": "off",
     "object-curly-spacing": ["error", "never"],
+    "new-cap": ["error", {"capIsNewExceptions": ["Router"]}],
   },
   overrides: [
     {
