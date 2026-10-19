@@ -325,6 +325,26 @@ document.addEventListener("DOMContentLoaded", () => {
     return div.innerHTML;
   }
 
+  async function checkServerStatus() {
+    try {
+      const res = await fetch("/api/health");
+      if (!res.ok) return;
+      const data = await res.json();
+      const pill = document.getElementById("active-model-pill");
+      if (pill && data.ethics) {
+        pill.textContent = `${data.ethics.badge}`;
+      }
+      const statusText = document.querySelector(".status-text");
+      if (statusText && data.selfHostedVm) {
+        const vmState = data.selfHostedVm.status === "CONNECTED_AND_ACTIVE" ? "Mumbai VM Active" : "Standby";
+        statusText.textContent = `Server: ${vmState} • Step ${data.ethics?.step ?? 0}`;
+      }
+    } catch (err) {
+      console.warn("Could not check server status:", err);
+    }
+  }
+
   // Initial Load
   loadChats();
+  checkServerStatus();
 });

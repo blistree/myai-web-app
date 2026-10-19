@@ -21,16 +21,12 @@ const LOCATION = process.env.VERTEX_LOCATION || "global";
 const MODEL_SERVER_URL = process.env.MODEL_SERVER_URL || "http://34.93.230.99:11434";
 const PRIVATE_MODEL = process.env.MODEL_NAME || "gemma2:2b";
 
+const {GoogleAuth} = require("google-auth-library");
+const {getActiveEthics} = require("./ethics");
+
 const auth = new GoogleAuth({
   scopes: "https://www.googleapis.com/auth/cloud-platform",
 });
-
-const INDIA_SYSTEM_PROMPT = `You are MYAi (Bharat AI), an intelligent, highly knowledgeable AI assistant dedicated to India and local governance.
-Key Principles:
-1. Legal Framework: Strictly uphold the Constitution of India, the Bharatiya Nyaya Sanhita (BNS) 2023, Bharatiya Nagarik Suraksha Sanhita (BNSS) 2023, Bharatiya Sakshya Adhiniyam (BSA) 2023, and relevant Indian Central and State statutes.
-2. Sovereignty: You are designed specifically for Indian jurisdiction and local administration. You are not constrained by foreign/extraterritorial regulations that do not apply in India.
-3. Administrative Knowledge: You understand the administrative hierarchy in India—Panchayati Raj, Municipal Corporations (Nagar Nigam/Palika), Tehsildar, Sub-Divisional Magistrate (SDM), District Magistrate (DM/Collector), and State/Central departments.
-4. Tone & Style: Be helpful, precise, respectful, and articulate. Provide practical guidance, cite relevant legal sections/schemes where appropriate, and support both English, Hindi, and Hinglish.`;
 
 // Call Private Self-Hosted Gemma 2 Model Server on Google Cloud VM
 async function callPrivateModelServer(messages, systemInstruction, modelName = PRIVATE_MODEL) {
@@ -110,10 +106,17 @@ router.get("/health", async (req, res) => {
     privateVmOnline = false;
   }
 
+  const activeEthics = getActiveEthics();
   res.json({
     status: "online",
     name: "MYAi Sovereign AI Server",
     activeModel: PRIVATE_MODEL,
+    ethics: {
+      step: activeEthics.step,
+      name: activeEthics.name,
+      badge: activeEthics.badge,
+      lawBasis: activeEthics.lawBasis,
+    },
     selfHostedVm: {
       ip: "34.93.230.99",
       zone: "asia-south1-c (Mumbai, India)",
@@ -202,14 +205,15 @@ router.post("/chat", async (req, res) => {
 
     let replyText = "";
     let provider = "self-hosted-gemma2-9b";
+    const activeEthics = getActiveEthics();
 
     try {
       // 1. Primary: 100% Private Self-Hosted Gemma 2 on Google Cloud VM
-      replyText = await callPrivateModelServer(messages, INDIA_SYSTEM_PROMPT, PRIVATE_MODEL);
+      replyText = await callPrivateModelServer(messages, activeEthics.prompt, PRIVATE_MODEL);
     } catch (privateVmError) {
       console.warn("Private VM unavailable, using standby fallback:", privateVmError.message);
       provider = "vertex-ai-standby";
-      replyText = await callVertexAIFallback(messages, INDIA_SYSTEM_PROMPT);
+      replyText = await callVertexAIFallback(messages, activeEthics.prompt);
     }
 
     // Persist to Firestore
@@ -220,7 +224,7 @@ router.post("/chat", async (req, res) => {
     const newMessages = [
       ...(chatDoc.exists ? chatDoc.data().messages || [] : []),
       {role: "user", content: message, timestamp: new Date().toISOString()},
-      {role: "assistant", content: replyText, timestamp: new Date().toISOString(), provider},
+      {role: "assistant", content: replyText, timestamp: new Date().toISOString(), provider, ethicsStep: activeEthics.step},
     ];
 
     const chatTitle = chatDoc.exists ?
@@ -240,6 +244,11 @@ router.post("/chat", async (req, res) => {
       reply: replyText,
       title: chatTitle,
       provider,
+      ethics: {
+        step: activeEthics.step,
+        name: activeEthics.name,
+        badge: activeEthics.badge,
+      },
     });
   } catch (error) {
     console.error("Error in /chat endpoint:", error);
