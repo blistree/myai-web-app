@@ -1,4 +1,8 @@
 document.addEventListener("DOMContentLoaded", () => {
+  // Authorized Admin UID (Strict security gate)
+  const AUTHORIZED_ADMIN_UID = "IXrVomHdvNXRTavKRq6XYghkF0i2";
+  let auth = null;
+
   // Elements
   const chatForm = document.getElementById("chat-form");
   const promptInput = document.getElementById("prompt-input");
@@ -14,10 +18,23 @@ document.addEventListener("DOMContentLoaded", () => {
   const sidebarOverlay = document.getElementById("sidebar-overlay");
   const promptCards = document.querySelectorAll(".prompt-card");
 
+  // Auth Elements
+  const authModalOverlay = document.getElementById("auth-modal-overlay");
+  const loginForm = document.getElementById("login-form");
+  const loginEmail = document.getElementById("login-email");
+  const loginPassword = document.getElementById("login-password");
+  const loginBtn = document.getElementById("login-btn");
+  const loginBtnText = document.getElementById("login-btn-text");
+  const authAlert = document.getElementById("auth-alert");
+  const sidebarUser = document.getElementById("sidebar-user");
+  const userEmailText = document.getElementById("user-email-text");
+  const logoutBtn = document.getElementById("logout-btn");
+
   // State
   let activeChatId = null;
   let conversationHistory = [];
   let isGenerating = false;
+  let isAuthenticated = false;
 
   // Initialize Markdown configuration
   if (window.marked) {
@@ -74,7 +91,7 @@ document.addEventListener("DOMContentLoaded", () => {
   promptInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (!isGenerating && promptInput.value.trim().length > 0) {
+      if (isAuthenticated && !isGenerating && promptInput.value.trim().length > 0) {
         chatForm.dispatchEvent(new Event("submit"));
       }
     }
@@ -83,6 +100,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Prompt Cards quick start
   promptCards.forEach(card => {
     card.addEventListener("click", () => {
+      if (!isAuthenticated) return;
       const prompt = card.getAttribute("data-prompt");
       if (prompt) {
         promptInput.value = prompt;
@@ -95,6 +113,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // New Chat Click
   newChatBtn.addEventListener("click", () => {
+    if (!isAuthenticated) return;
     startNewChat();
   });
 
@@ -110,11 +129,155 @@ document.addEventListener("DOMContentLoaded", () => {
     sidebarOverlay.classList.remove("active");
   }
 
+  // Helper to obtain current user ID Token for backend authentication
+  async function getAuthHeaders() {
+    if (!auth || !auth.currentUser) return {};
+    try {
+      const token = await auth.currentUser.getIdToken(true);
+      return {
+        "Authorization": `Bearer ${token}`
+      };
+    } catch (e) {
+      console.warn("Could not retrieve Firebase ID token:", e);
+      return {};
+    }
+  }
+
+  // Authentication UI Helpers
+  function showAuthAlert(msg) {
+    if (authAlert) {
+      authAlert.textContent = msg;
+      authAlert.style.display = "block";
+    }
+  }
+
+  function clearAuthAlert() {
+    if (authAlert) {
+      authAlert.textContent = "";
+      authAlert.style.display = "none";
+    }
+  }
+
+  // Initialize Firebase dynamically from backend /api/config
+  async function initFirebaseAuth() {
+    try {
+      const configRes = await fetch("/api/config");
+      if (!configRes.ok) throw new Error("Failed to fetch Firebase client config");
+      const firebaseConfig = await configRes.json();
+
+      if (window.firebase && !firebase.apps.length) {
+        firebase.initializeApp(firebaseConfig);
+      }
+      auth = window.firebase ? firebase.auth() : null;
+
+      if (auth) {
+        setupAuthListeners();
+      }
+    } catch (err) {
+      console.error("Initialization error:", err);
+      showAuthAlert("Failed to initialize authentication service. Please refresh.");
+    }
+  }
+
+  function setupAuthListeners() {
+    // Handle Administrator Login Submission
+    if (loginForm) {
+      loginForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        clearAuthAlert();
+
+        const email = loginEmail.value.trim();
+        const password = loginPassword.value;
+        if (!email || !password || !auth) return;
+
+        loginBtn.disabled = true;
+        loginBtnText.textContent = "Verifying Credentials...";
+
+        try {
+          const userCredential = await auth.signInWithEmailAndPassword(email, password);
+          const user = userCredential.user;
+
+          // Verify UID authorization
+          if (user.uid !== AUTHORIZED_ADMIN_UID) {
+            await auth.signOut();
+            throw new Error("Access Denied: Your account UID is not authorized to access this private sovereign model.");
+          }
+
+          loginForm.reset();
+          authModalOverlay.style.display = "none";
+        } catch (err) {
+          console.error("Login verification failed:", err);
+          let errorMsg = err.message;
+          if (err.code === "auth/invalid-credential" || err.code === "auth/wrong-password" || err.code === "auth/user-not-found") {
+            errorMsg = "Incorrect email or password. Please verify and try again.";
+          } else if (err.code === "auth/too-many-requests") {
+            errorMsg = "Too many failed attempts. Please wait a few minutes before trying again.";
+          }
+          showAuthAlert(errorMsg);
+        } finally {
+          loginBtn.disabled = false;
+          loginBtnText.textContent = "Sign In as Administrator";
+        }
+      });
+    }
+
+    // Handle Logout
+    if (logoutBtn) {
+      logoutBtn.addEventListener("click", async () => {
+        if (auth && confirm("Sign out of MYAi administrator session?")) {
+          await auth.signOut();
+        }
+      });
+    }
+
+    // Auth State Listener
+    auth.onAuthStateChanged(async (user) => {
+      if (user) {
+        if (user.uid !== AUTHORIZED_ADMIN_UID) {
+          await auth.signOut();
+          showAuthAlert("Access Denied: Unauthorized UID. Only the administrator is granted access.");
+          authModalOverlay.style.display = "flex";
+          sidebarUser.style.display = "none";
+          isAuthenticated = false;
+          promptInput.disabled = true;
+          sendBtn.disabled = true;
+          return;
+        }
+
+        // Successfully Authenticated Admin
+        isAuthenticated = true;
+        authModalOverlay.style.display = "none";
+        sidebarUser.style.display = "flex";
+        userEmailText.textContent = user.email || "Administrator";
+        promptInput.disabled = false;
+        sendBtn.disabled = false;
+        loadChats();
+      } else {
+        // Logged Out
+        isAuthenticated = false;
+        authModalOverlay.style.display = "flex";
+        sidebarUser.style.display = "none";
+        promptInput.disabled = true;
+        sendBtn.disabled = true;
+        chatList.innerHTML = `<div class="chat-list-empty">Sign in to view conversations</div>`;
+      }
+    });
+  }
+
   // Load Chats from Backend
   async function loadChats() {
+    if (!isAuthenticated) return;
     try {
-      const res = await fetch("/api/chats");
-      if (!res.ok) return;
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch("/api/chats", {
+        headers: { ...authHeaders }
+      });
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          authModalOverlay.style.display = "flex";
+        }
+        return;
+      }
       const data = await res.json();
       renderChatList(data.chats || []);
     } catch (err) {
@@ -158,8 +321,12 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function loadChatMessages(chatId) {
+    if (!isAuthenticated) return;
     try {
-      const res = await fetch(`/api/chats/${chatId}`);
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch(`/api/chats/${chatId}`, {
+        headers: { ...authHeaders }
+      });
       if (!res.ok) return;
       const data = await res.json();
 
@@ -187,8 +354,13 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function deleteChat(chatId) {
+    if (!isAuthenticated) return;
     try {
-      await fetch(`/api/chats/${chatId}`, { method: "DELETE" });
+      const authHeaders = await getAuthHeaders();
+      await fetch(`/api/chats/${chatId}`, {
+        method: "DELETE",
+        headers: { ...authHeaders }
+      });
       if (activeChatId === chatId) {
         startNewChat();
       }
@@ -201,6 +373,11 @@ document.addEventListener("DOMContentLoaded", () => {
   // Handle Form Submission
   chatForm.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (!isAuthenticated) {
+      authModalOverlay.style.display = "flex";
+      return;
+    }
+
     const prompt = promptInput.value.trim();
     if (!prompt || isGenerating) return;
 
@@ -222,9 +399,13 @@ document.addEventListener("DOMContentLoaded", () => {
     scrollToBottom();
 
     try {
+      const authHeaders = await getAuthHeaders();
       const response = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders
+        },
         body: JSON.stringify({
           message: prompt,
           chatId: activeChatId,
@@ -236,6 +417,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
+        if (response.status === 401 || response.status === 403) {
+          authModalOverlay.style.display = "flex";
+        }
         throw new Error(errData.error || "Server response failed");
       }
 
@@ -254,7 +438,7 @@ document.addEventListener("DOMContentLoaded", () => {
       scrollToBottom();
     } catch (error) {
       typingIndicatorRow.remove();
-      appendMessage("assistant", `⚠️ **Error**: ${error.message}\n\nPlease check your Google Cloud connection or try again shortly.`, false);
+      appendMessage("assistant", `⚠️ **Authentication/Server Error**: ${error.message}`, false);
       scrollToBottom();
     } finally {
       sendBtn.disabled = false;
@@ -344,7 +528,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // Initial Load
-  loadChats();
+  // Initial Boot
   checkServerStatus();
+  initFirebaseAuth();
 });

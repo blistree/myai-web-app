@@ -6,7 +6,13 @@ const cors = require("cors");
 const {GoogleAuth} = require("google-auth-library");
 
 admin.initializeApp();
-const db = admin.firestore();
+let firestoreDb = null;
+function getDb() {
+  if (!firestoreDb) {
+    firestoreDb = admin.firestore();
+  }
+  return firestoreDb;
+}
 
 setGlobalOptions({maxInstances: 10, region: "us-central1"});
 
@@ -131,10 +137,52 @@ router.get("/health", async (req, res) => {
   });
 });
 
-// List all chats
-router.get("/chats", async (req, res) => {
+// Dynamic Firebase Web Configuration (served from environment without committing secrets to git)
+router.get("/config", (req, res) => {
+  res.json({
+    apiKey: process.env.FIREBASE_WEB_API_KEY || "",
+    authDomain: "ai-projects-ca4cf.firebaseapp.com",
+    projectId: "ai-projects-ca4cf",
+    storageBucket: "ai-projects-ca4cf.firebasestorage.app",
+    messagingSenderId: "1004548547081",
+    appId: "1:1004548547081:web:0bacde3c41f471ddd38ed8",
+  });
+});
+
+const AUTHORIZED_ADMIN_UID = process.env.ADMIN_UID || "IXrVomHdvNXRTavKRq6XYghkF0i2";
+
+// Admin Authentication Middleware (Restricts access exclusively to authorized admin UID)
+async function requireAuthorizedAdmin(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({
+      error: "Authentication required. Please sign in with administrator credentials.",
+    });
+  }
+
+  const token = authHeader.split("Bearer ")[1];
   try {
-    const snapshot = await db.collection("chats")
+    const decoded = await admin.auth().verifyIdToken(token);
+    if (decoded.uid !== AUTHORIZED_ADMIN_UID) {
+      console.warn(`Unauthorized access attempt by UID: ${decoded.uid} (${decoded.email || "no email"})`);
+      return res.status(403).json({
+        error: "Forbidden: Access restricted to authorized administrator (UID mismatch).",
+      });
+    }
+    req.user = decoded;
+    next();
+  } catch (err) {
+    console.error("Token verification failed:", err.message);
+    return res.status(401).json({
+      error: "Invalid or expired session. Please sign in again.",
+    });
+  }
+}
+
+// List all chats
+router.get("/chats", requireAuthorizedAdmin, async (req, res) => {
+  try {
+    const snapshot = await getDb().collection("chats")
         .orderBy("updatedAt", "desc")
         .limit(50)
         .get();
@@ -156,10 +204,10 @@ router.get("/chats", async (req, res) => {
 });
 
 // Get a specific chat messages
-router.get("/chats/:chatId", async (req, res) => {
+router.get("/chats/:chatId", requireAuthorizedAdmin, async (req, res) => {
   try {
     const {chatId} = req.params;
-    const doc = await db.collection("chats").doc(chatId).get();
+    const doc = await getDb().collection("chats").doc(chatId).get();
     if (!doc.exists) {
       return res.status(404).json({error: "Chat not found"});
     }
@@ -176,10 +224,10 @@ router.get("/chats/:chatId", async (req, res) => {
 });
 
 // Delete a specific chat
-router.delete("/chats/:chatId", async (req, res) => {
+router.delete("/chats/:chatId", requireAuthorizedAdmin, async (req, res) => {
   try {
     const {chatId} = req.params;
-    await db.collection("chats").doc(chatId).delete();
+    await getDb().collection("chats").doc(chatId).delete();
     res.json({success: true, deleted: chatId});
   } catch (error) {
     console.error("Error deleting chat:", error);
@@ -188,7 +236,7 @@ router.delete("/chats/:chatId", async (req, res) => {
 });
 
 // Chat completion endpoint
-router.post("/chat", async (req, res) => {
+router.post("/chat", requireAuthorizedAdmin, async (req, res) => {
   try {
     const {message, chatId, history = []} = req.body;
     if (!message || typeof message !== "string") {
@@ -222,8 +270,8 @@ router.post("/chat", async (req, res) => {
     }
 
     // Persist to Firestore
-    const activeChatId = chatId || db.collection("chats").doc().id;
-    const chatRef = db.collection("chats").doc(activeChatId);
+    const activeChatId = chatId || getDb().collection("chats").doc().id;
+    const chatRef = getDb().collection("chats").doc(activeChatId);
     const chatDoc = await chatRef.get();
 
     const newMessages = [
