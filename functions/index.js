@@ -21,7 +21,6 @@ const LOCATION = process.env.VERTEX_LOCATION || "global";
 const MODEL_SERVER_URL = process.env.MODEL_SERVER_URL || "http://34.93.230.99:11434";
 const PRIVATE_MODEL = process.env.MODEL_NAME || "gemma2:2b";
 
-const {GoogleAuth} = require("google-auth-library");
 const {getActiveEthics} = require("./ethics");
 
 const auth = new GoogleAuth({
