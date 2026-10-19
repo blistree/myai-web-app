@@ -44,38 +44,35 @@ function getAuth() {
   return authClient;
 }
 
-// Call Private Self-Hosted Gemma 2 Model Server on Google Cloud VM
-async function callPrivateModelServer(messages, systemInstruction, modelName = PRIVATE_MODEL, parentSignal = null) {
+// Call Private Self-Hosted Sovereign Model Server on Google Cloud VM
+async function callPrivateModelServer(messages, systemInstruction, modelName = PRIVATE_MODEL) {
   const formattedMessages = [
     {role: "system", content: systemInstruction},
     ...messages,
   ];
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 180000);
-  if (parentSignal) {
-    if (parentSignal.aborted) {
-      controller.abort();
-    } else {
-      parentSignal.addEventListener("abort", () => controller.abort(), {once: true});
-    }
-  }
-
   const url = `${MODEL_SERVER_URL}/v1/chat/completions`;
+  console.log(`[OLLAMA_CALL_START] sending request to ${url} with model ${modelName}`);
+  const startTime = Date.now();
+
   const response = await fetch(url, {
     method: "POST",
-    headers: {"Content-Type": "application/json"},
+    headers: {
+      "Content-Type": "application/json",
+      "Connection": "close",
+    },
     body: JSON.stringify({
       model: modelName,
       messages: formattedMessages,
       temperature: 0.6,
-      max_tokens: 600,
+      max_tokens: 400,
       keep_alive: -1,
     }),
-    signal: controller.signal,
+    signal: AbortSignal.timeout(50000),
   });
 
-  clearTimeout(timeoutId);
+  const duration = Date.now() - startTime;
+  console.log(`[OLLAMA_CALL_END] status ${response.status} in ${duration}ms`);
 
   const data = await response.json();
   if (data.error) {
@@ -149,6 +146,40 @@ router.get("/health", async (req, res) => {
     },
     fallback: "Vertex AI Global Endpoint",
   });
+});
+
+// Direct Diagnostic Endpoint to verify Cloud Run -> VM Ollama connectivity
+router.get("/test-ollama", async (req, res) => {
+  const t0 = Date.now();
+  try {
+    const url = `${MODEL_SERVER_URL}/v1/chat/completions`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Connection": "close",
+      },
+      body: JSON.stringify({
+        model: PRIVATE_MODEL,
+        messages: [{role: "user", content: "Say hello in 5 words."}],
+        max_tokens: 30,
+      }),
+      signal: AbortSignal.timeout(30000),
+    });
+    const data = await response.json();
+    res.json({
+      status: "success",
+      latencyMs: Date.now() - t0,
+      model: PRIVATE_MODEL,
+      reply: data.choices?.[0]?.message?.content || "",
+    });
+  } catch (err) {
+    res.status(500).json({
+      status: "error",
+      latencyMs: Date.now() - t0,
+      error: err.message,
+    });
+  }
 });
 
 // Dynamic Firebase Web Configuration (served from environment without committing secrets to git)
@@ -274,19 +305,15 @@ router.post("/chat", requireAuthorizedAdmin, async (req, res) => {
     let provider = "self-hosted-myai-sovereign";
     const activeEthics = getActiveEthics();
 
+    console.log(`[CHAT_START] processing message from UID ${req.user.uid}`);
     try {
       // 1. Primary: 100% Private Self-Hosted Sovereign Model on Google Cloud VM
-      replyText = await callPrivateModelServer(messages, activeEthics.prompt, PRIVATE_MODEL, req.signal);
+      replyText = await callPrivateModelServer(messages, activeEthics.prompt, PRIVATE_MODEL);
     } catch (privateVmError) {
-      if (req.closed || req.signal?.aborted) {
-        return;
-      }
       console.error("Private VM error:", privateVmError.message);
-      throw new Error("Private server is busy or generating another response. Please retry in a moment: " + privateVmError.message);
-    }
-
-    if (req.closed || req.signal?.aborted) {
-      return;
+      return res.status(503).json({
+        error: "Private server busy or generation timed out: " + privateVmError.message,
+      });
     }
 
     // Persist to Firestore
