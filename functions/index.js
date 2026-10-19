@@ -14,7 +14,12 @@ function getDb() {
   return firestoreDb;
 }
 
-setGlobalOptions({maxInstances: 10, region: "us-central1"});
+setGlobalOptions({
+  maxInstances: 10,
+  region: "us-central1",
+  timeoutSeconds: 300,
+  memory: "512MiB",
+});
 
 const app = express();
 app.use(cors({origin: true}));
@@ -25,7 +30,7 @@ const LOCATION = process.env.VERTEX_LOCATION || "global";
 
 // Private Self-Hosted Model Server (Google Compute Engine VM)
 const MODEL_SERVER_URL = process.env.MODEL_SERVER_URL || "http://34.93.230.99:11434";
-const PRIVATE_MODEL = process.env.MODEL_NAME || "gemma2:2b";
+const PRIVATE_MODEL = process.env.MODEL_NAME || "myai-sovereign:latest";
 
 const {getActiveEthics} = require("./ethics");
 
@@ -40,14 +45,21 @@ function getAuth() {
 }
 
 // Call Private Self-Hosted Gemma 2 Model Server on Google Cloud VM
-async function callPrivateModelServer(messages, systemInstruction, modelName = PRIVATE_MODEL) {
+async function callPrivateModelServer(messages, systemInstruction, modelName = PRIVATE_MODEL, parentSignal = null) {
   const formattedMessages = [
     {role: "system", content: systemInstruction},
     ...messages,
   ];
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000);
+  const timeoutId = setTimeout(() => controller.abort(), 180000);
+  if (parentSignal) {
+    if (parentSignal.aborted) {
+      controller.abort();
+    } else {
+      parentSignal.addEventListener("abort", () => controller.abort(), {once: true});
+    }
+  }
 
   const url = `${MODEL_SERVER_URL}/v1/chat/completions`;
   const response = await fetch(url, {
@@ -56,7 +68,9 @@ async function callPrivateModelServer(messages, systemInstruction, modelName = P
     body: JSON.stringify({
       model: modelName,
       messages: formattedMessages,
-      temperature: 0.7,
+      temperature: 0.6,
+      max_tokens: 600,
+      keep_alive: -1,
     }),
     signal: controller.signal,
   });
@@ -257,16 +271,23 @@ router.post("/chat", requireAuthorizedAdmin, async (req, res) => {
     messages.push({role: "user", content: message});
 
     let replyText = "";
-    let provider = "self-hosted-gemma2-9b";
+    let provider = "self-hosted-myai-sovereign";
     const activeEthics = getActiveEthics();
 
     try {
       // 1. Primary: 100% Private Self-Hosted Gemma 2 on Google Cloud VM
-      replyText = await callPrivateModelServer(messages, activeEthics.prompt, PRIVATE_MODEL);
+      replyText = await callPrivateModelServer(messages, activeEthics.prompt, PRIVATE_MODEL, req.signal);
     } catch (privateVmError) {
+      if (req.closed || req.signal?.aborted) {
+        return;
+      }
       console.warn("Private VM unavailable, using standby fallback:", privateVmError.message);
       provider = "vertex-ai-standby";
       replyText = await callVertexAIFallback(messages, activeEthics.prompt);
+    }
+
+    if (req.closed || req.signal?.aborted) {
+      return;
     }
 
     // Persist to Firestore
@@ -314,4 +335,7 @@ router.post("/chat", requireAuthorizedAdmin, async (req, res) => {
 app.use("/api", router);
 app.use("/", router);
 
-exports.api = onRequest(app);
+exports.api = onRequest({
+  timeoutSeconds: 300,
+  memory: "512MiB",
+}, app);

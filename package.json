@@ -8,7 +8,8 @@
     "start": "node server.js",
     "build": "node -e \"console.log('Root build completed successfully')\"",
     "lint": "npm --prefix functions run lint",
-    "deploy": "firebase deploy"
+    "deploy": "firebase deploy",
+    "deploy:model": "powershell -ExecutionPolicy Bypass -File ./deploy-model.ps1"
   },
   "dependencies": {
     "cors": "^2.8.5",

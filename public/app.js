@@ -1,6 +1,11 @@
 document.addEventListener("DOMContentLoaded", () => {
   // Authorized Admin UID (Strict security gate)
   const AUTHORIZED_ADMIN_UID = "IXrVomHdvNXRTavKRq6XYghkF0i2";
+  // Direct Cloud Run endpoint to bypass Firebase Hosting 60s CDN proxy timeout
+  const CLOUD_RUN_API_BASE = "https://api-62x7rip7mq-uc.a.run.app";
+  const API_BASE = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+    ? ""
+    : CLOUD_RUN_API_BASE;
   let auth = null;
 
   // Elements
@@ -161,7 +166,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Initialize Firebase dynamically from backend /api/config
   async function initFirebaseAuth() {
     try {
-      const configRes = await fetch("/api/config");
+      const configRes = await fetch(`${API_BASE}/api/config`);
       if (!configRes.ok) throw new Error("Failed to fetch Firebase client config");
       const firebaseConfig = await configRes.json();
 
@@ -269,7 +274,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!isAuthenticated) return;
     try {
       const authHeaders = await getAuthHeaders();
-      const res = await fetch("/api/chats", {
+      const res = await fetch(`${API_BASE}/api/chats`, {
         headers: { ...authHeaders }
       });
       if (!res.ok) {
@@ -324,7 +329,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!isAuthenticated) return;
     try {
       const authHeaders = await getAuthHeaders();
-      const res = await fetch(`/api/chats/${chatId}`, {
+      const res = await fetch(`${API_BASE}/api/chats/${chatId}`, {
         headers: { ...authHeaders }
       });
       if (!res.ok) return;
@@ -357,7 +362,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!isAuthenticated) return;
     try {
       const authHeaders = await getAuthHeaders();
-      await fetch(`/api/chats/${chatId}`, {
+      await fetch(`${API_BASE}/api/chats/${chatId}`, {
         method: "DELETE",
         headers: { ...authHeaders }
       });
@@ -400,7 +405,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     try {
       const authHeaders = await getAuthHeaders();
-      const response = await fetch("/api/chat", {
+      const response = await fetch(`${API_BASE}/api/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -511,7 +516,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function checkServerStatus() {
     try {
-      const res = await fetch("/api/health");
+      const res = await fetch(`${API_BASE}/api/health`);
       if (!res.ok) return;
       const data = await res.json();
       const pill = document.getElementById("active-model-pill");
