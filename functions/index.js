@@ -140,7 +140,7 @@ router.get("/health", async (req, res) => {
 // Dynamic Firebase Web Configuration (served from environment without committing secrets to git)
 router.get("/config", (req, res) => {
   res.json({
-    apiKey: process.env.FIREBASE_WEB_API_KEY || "",
+    apiKey: process.env.WEB_CLIENT_API_KEY || "",
     authDomain: "ai-projects-ca4cf.firebaseapp.com",
     projectId: "ai-projects-ca4cf",
     storageBucket: "ai-projects-ca4cf.firebasestorage.app",
