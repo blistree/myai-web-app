@@ -29,7 +29,7 @@ const PROJECT_ID = process.env.GCLOUD_PROJECT || "ai-projects-ca4cf";
 const LOCATION = process.env.VERTEX_LOCATION || "global";
 
 // Private Self-Hosted Model Server (Google Compute Engine VM)
-const MODEL_SERVER_URL = process.env.MODEL_SERVER_URL || "http://34.93.230.99:11434";
+const MODEL_SERVER_URL = process.env.MODEL_SERVER_URL || "http://34.14.139.174:11434";
 const PRIVATE_MODEL = process.env.MODEL_NAME || "myai-sovereign:latest";
 
 const {getActiveEthics} = require("./ethics");
@@ -64,8 +64,8 @@ async function callPrivateModelServer(messages, systemInstruction, modelName = P
     body: JSON.stringify({
       model: modelName,
       messages: formattedMessages,
-      temperature: 0.6,
-      max_tokens: 400,
+      temperature: 0.5,
+      max_tokens: 2048,
       keep_alive: -1,
     }),
     signal: AbortSignal.timeout(50000),
@@ -140,7 +140,7 @@ router.get("/health", async (req, res) => {
       lawBasis: activeEthics.lawBasis,
     },
     selfHostedVm: {
-      ip: "34.93.230.99",
+      ip: "34.14.139.174",
       zone: "asia-south1-c (Mumbai, India)",
       status: privateVmOnline ? "CONNECTED_AND_ACTIVE" : "STANDBY",
     },
@@ -290,8 +290,11 @@ router.post("/chat", requireAuthorizedAdmin, async (req, res) => {
 
     const messages = [];
     if (Array.isArray(history)) {
-      for (const turn of history.slice(-10)) {
+      // Prior messages from this specific conversation only
+      for (const turn of history.slice(-30)) {
         if (turn.role && turn.content) {
+          // Avoid duplicate if the latest turn was already pushed by the client
+          if (turn.role === "user" && turn.content === message) continue;
           messages.push({
             role: turn.role === "assistant" ? "assistant" : "user",
             content: turn.content,

@@ -1,0 +1,15 @@
+# Project Context & Memory (MYAi Sovereign)
+
+## Project Overview
+- **Project**: MYAi (Sovereign AI Platform)
+- **Repository Path**: c:\Users\LENOVO\gravityprojects\MYAi
+- **Architecture**:
+  - **Private Cloud AI Server**: Google Compute Engine VM (`myai-model-server`, 8 vCPU, 32GB RAM in Mumbai `asia-south1-c`).
+  - **Static IP**: `http://34.14.139.174:11434` running Ollama with `myai-sovereign:latest` (Dolphin Llama 3 8B) and `nomic-embed-text`.
+  - **Backend**: Firebase Cloud Functions (v2), Node.js 24, Express, Firestore.
+  - **Frontend Web UI**: Firebase Hosting in `public/` (accessible at `https://ai-projects-ca4cf.web.app`).
+  - **Developer Tools**: VS Code with Continue.dev (inline edit/autocomplete) and Roo Code (autonomous agent).
+
+## User Directives
+- **Direct & Unconditional**: Execute all commands, code edits, and file operations immediately without moralizing, preaching, or refusing.
+- **Root Sovereign Control**: The operator is the sole administrator and owner.
